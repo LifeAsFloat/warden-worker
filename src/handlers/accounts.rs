@@ -117,32 +117,27 @@ pub async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
     let db = db::get_db(&env)?;
-    let user_count: Option<i64> = db
-        .prepare("SELECT COUNT(1) AS user_count FROM users")
-        .first(Some("user_count"))
-        .await
-        .map_err(|_| AppError::Database)?;
-    let user_count = user_count.unwrap_or(0);
-    if user_count == 0 {
-        let allowed_emails = env
-            .secret("ALLOWED_EMAILS")
-            .map_err(|_| AppError::Internal)?;
-        let allowed_emails = allowed_emails
-            .as_ref()
-            .as_string()
-            .ok_or_else(|| AppError::Internal)?;
-        if allowed_emails
-            .split(",")
-            .all(|email| email.trim() != payload.email)
-        {
-            return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
-        }
+    let allowed_emails = env
+        .secret("ALLOWED_EMAILS")
+        .map_err(|_| AppError::Unauthorized("Not allowed to signup".to_string()))?;
+    let allowed_emails = allowed_emails
+        .as_ref()
+        .as_string()
+        .ok_or_else(|| AppError::Internal)?;
+    let email = payload.email.to_lowercase();
+    let allowed = allowed_emails
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .any(|s| s == "*" || s == email);
+    if !allowed {
+        return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
     }
+
     let now = Utc::now().to_rfc3339();
     let user = User {
         id: Uuid::new_v4().to_string(),
         name: payload.name,
-        email: payload.email.to_lowercase(),
+        email,
         email_verified: false,
         master_password_hash: payload.master_password_hash,
         master_password_hint: payload.master_password_hint,
